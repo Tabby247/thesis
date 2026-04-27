@@ -43,362 +43,1264 @@ canvas{display:block}
 <div id="bf"></div>
 
 <script type="importmap">
-{"imports":{"three":"https://unpkg.com/three@0.160.0/build/three.module.js","three/addons/":"https://unpkg.com/three@0.160.0/examples/jsm/"}}
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
 </script>
 <script type="module">
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
-/* ═══ 建筑参数 ═══ */
-const ST=4,FL=5,BH=ST*FL,PH=30,SP=56,HW=18,DP=40,FR=62,SG=52,VS=14,WS=30;
-const RH=BH-ST,RD=22,RZ0=-DP/2,RZ1=RZ0-RD;
-const DR=5.5,DCX=0,DCZ=(RZ0+RZ1)/2,DCY=RH;
+// ══════════════════════════════════════
+// Building Dimensions
+// ══════════════════════════════════════
+const STORY_H = 4;
+const FLOORS = 5;
+const BASE_H = STORY_H * FLOORS;   // 20m back wall height
+const PEAK_H = 30;                  // 30m front peak
+const SPIRE_H = 56;                 // 56m spire tip
+const HALF_W = 18;                  // 18m half-width at back (36m total)
+const TRI_DEPTH = 40;               // 40m triangle depth
 
-function fh(u,s){return BH+(PH-BH)*Math.pow(u,2)+s*2.2*u}
-function fx(u,s){return s*HW*(1-u)+s*(Math.sin(u*Math.PI)*3.8*u+Math.sin(u*Math.PI*3+(s>0?0:1.6))*1.1*u)}
+// Rectangle extension
+const RECT_H = BASE_H - STORY_H;   // 16m, one floor stepped down
+const RECT_DEPTH = 22;             // 22m deep
+const RECT_Z_BACK = -TRI_DEPTH / 2 - RECT_DEPTH;  // -42
+const RECT_Z_FRONT = -TRI_DEPTH / 2;              // -20
 
-/* ═══ 渲染器 ═══ */
-const R=new THREE.WebGLRenderer({antialias:true,powerPreference:'high-performance'});
-R.setSize(innerWidth,innerHeight);R.setPixelRatio(Math.min(devicePixelRatio,2));
-R.shadowMap.enabled=true;R.shadowMap.type=THREE.PCFSoftShadowMap;
-R.toneMapping=THREE.ACESFilmicToneMapping;R.toneMappingExposure=1.2;
-R.outputColorSpace=THREE.SRGBColorSpace;document.body.appendChild(R.domElement);
+// Dome
+const DOME_R = 5.5;
+const DOME_CX = 0;
+const DOME_CY = RECT_H;
+const DOME_CZ = (RECT_Z_FRONT + RECT_Z_BACK) / 2; // -31
 
-/* ═══ 场景/相机 ═══ */
-const scene=new THREE.Scene();scene.fog=new THREE.FogExp2(0xc8d4e0,0.0013);
-const cam=new THREE.PerspectiveCamera(54,innerWidth/innerHeight,0.5,650);cam.position.set(0,18,72);
-const ctrl=new OrbitControls(cam,R.domElement);ctrl.enableDamping=true;ctrl.dampingFactor=0.06;
-ctrl.target.set(0,10,-4);ctrl.minDistance=18;ctrl.maxDistance=180;ctrl.maxPolarAngle=Math.PI/2-0.02;
-ctrl.autoRotate=true;ctrl.autoRotateSpeed=0.2;
+// Field
+const FIELD_R = 62;
 
-/* ═══ 环境贴图 ═══ */
-function makeEnv(){
-  const es=new THREE.Scene();
-  es.add(new THREE.Mesh(new THREE.SphereGeometry(400,32,24),new THREE.ShaderMaterial({side:THREE.BackSide,
-    uniforms:{cT:{value:new THREE.Color(0x2468a8)},cM:{value:new THREE.Color(0x78aed0)},cB:{value:new THREE.Color(0xc8d4e0)}},
-    vertexShader:'varying vec3 vW;void main(){vW=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-    fragmentShader:'uniform vec3 cT,cM,cB;varying vec3 vW;void main(){float h=normalize(vW).y;vec3 c=h>0.?mix(cM,cT,h):mix(cM,cB,clamp(-h*3.,0.,1.));gl_FragColor=vec4(c,1.);}'
-  })));
-  const sn=new THREE.Mesh(new THREE.SphereGeometry(22,12,12),new THREE.MeshBasicMaterial({color:0xffffff}));
-  sn.position.set(0,220,180);es.add(sn);
-  const gl=new THREE.Mesh(new THREE.PlaneGeometry(160,160),new THREE.MeshBasicMaterial({color:0xeeeeff,transparent:true,opacity:0.38}));
-  gl.position.set(0,180,220);gl.lookAt(0,0,0);es.add(gl);
-  const cs=[0x5c6872,0x6e7a84,0x525e68,0x78848e,0x48545e,0x3e4e5e,0x344450];
-  for(let i=0;i<55;i++){const a=(i/55)*Math.PI*2,d=160+Math.random()*90,
-    w=12+Math.random()*28,h=28+Math.random()*85,dp=12+Math.random()*28;
-    const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,dp),new THREE.MeshBasicMaterial({color:cs[i%cs.length]}));
-    m.position.set(Math.cos(a)*d,h/2,Math.sin(a)*d);es.add(m)}
-  const gn=new THREE.Mesh(new THREE.PlaneGeometry(900,900),new THREE.MeshBasicMaterial({color:0x3a5a2e}));
-  gn.rotation.x=-Math.PI/2;gn.position.y=-0.1;es.add(gn);
-  const pm=new THREE.PMREMGenerator(R);pm.compileEquirectangularShader();
-  const t=pm.fromScene(es,0,0.1,1000).texture;pm.dispose();return t;
-}
-const envMap=makeEnv();scene.environment=envMap;
+// Mesh resolution
+const SEG = 50;
+const VSEG = 14;
+const WSEG = 28;
 
-/* ═══ 材质 ═══ */
-const glass=new THREE.MeshPhysicalMaterial({color:0x82b8cc,metalness:0.1,roughness:0.012,
-  envMap,envMapIntensity:3.2,clearcoat:1,clearcoatRoughness:0.004,
-  reflectivity:1,transparent:true,opacity:0.84,side:THREE.DoubleSide,depthWrite:true});
-const domeGlass=new THREE.MeshPhysicalMaterial({color:0x90c8e0,metalness:0.08,roughness:0.008,
-  envMap,envMapIntensity:3.5,clearcoat:1,clearcoatRoughness:0.002,
-  reflectivity:1,transparent:true,opacity:0.7,side:THREE.DoubleSide,depthWrite:true});
-const spineMt=new THREE.MeshPhysicalMaterial({color:0xc8c8c8,metalness:0.92,roughness:0.04,envMap,envMapIntensity:2.8});
-const slabMt=new THREE.MeshStandardMaterial({color:0x484848,roughness:0.3,metalness:0.45,transparent:true,opacity:0.55,side:THREE.DoubleSide});
-const mulMt=new THREE.LineBasicMaterial({color:0x1e1e1e});
-const edgeMt=new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.55});
-
-/* ═══ 三角区几何体 ═══ */
-function mkFacade(side){
-  const p=[],uv=[],idx=[];
-  for(let i=0;i<=SG;i++){const u=i/SG,x=fx(u,side),z=-DP/2+DP*u,h=fh(u,side);
-    for(let j=0;j<=VS;j++){const v=j/VS;p.push(x,v*h,z);uv.push(u,v)}}
-  for(let i=0;i<SG;i++)for(let j=0;j<VS;j++){const a=i*(VS+1)+j,b=a+VS+1;
-    side<0?idx.push(a,b,b+1,a,b+1,a+1):idx.push(a,a+1,b+1,a,b+1,b)}
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
-  g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(idx);g.computeVertexNormals();return g;
-}
-function mkRoof(){
-  const p=[],uv=[],idx=[];
-  for(let i=0;i<=SG;i++){const u=i/SG,z=-DP/2+DP*u,xL=fx(u,-1),xR=fx(u,1),hL=fh(u,-1),hR=fh(u,1);
-    for(let j=0;j<=WS;j++){const w=j/WS;p.push(xL+w*(xR-xL),hL+w*(hR-hL),z);uv.push(w,u)}}
-  for(let i=0;i<SG;i++)for(let j=0;j<WS;j++){const a=i*(WS+1)+j,b=a+WS+1;idx.push(a,b,b+1,a,b+1,a+1)}
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
-  g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(idx);g.computeVertexNormals();return g;
-}
-function mkSlab(fH,ins){
-  const s=16,p=[],idx=[];
-  for(let i=0;i<=s;i++){const u=i/s,xL=fx(u,-1)+ins,xR=fx(u,1)-ins,z=-DP/2+DP*u;
-    for(let j=0;j<=s;j++){const w=j/s;p.push(xL+w*(xR-xL),fH,z)}}
-  for(let i=0;i<s;i++)for(let j=0;j<s;j++){const a=i*(s+1)+j,b=a+s+1;idx.push(a,b,b+1,a,b+1,a+1)}
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
-  g.setIndex(idx);g.computeVertexNormals();return g;
-}
-function mkMullions(side){
-  const pts=[],finPts=[],nv=40;
-  for(let vi=0;vi<=nv;vi++){const u=vi/nv,x=fx(u,side),z=-DP/2+DP*u,h=fh(u,side);
-    for(let j=0;j<VS;j++){const v0=j/VS,v1=(j+1)/VS;pts.push(x,v0*h,z,x,v1*h,z)}}
-  for(let f=0;f<=FL;f++){const v=f/FL;for(let i=0;i<SG;i++){
-    const u0=i/SG,u1=(i+1)/SG;pts.push(fx(u0,side),v*fh(u0,side),-DP/2+DP*u0,fx(u1,side),v*fh(u1,side),-DP/2+DP*u1)}}
-  for(let f=0;f<FL;f++){const v=(f+0.5)/FL;for(let i=0;i<SG;i++){
-    const u0=i/SG,u1=(i+1)/SG;pts.push(fx(u0,side),v*fh(u0,side),-DP/2+DP*u0,fx(u1,side),v*fh(u1,side),-DP/2+DP*u1)}}
-  for(let f=1;f<=FL;f+=2){const v=f/FL;for(let i=2;i<SG;i+=3){
-    const u=i/SG,x=fx(u,side),z=-DP/2+DP*u,y=v*fh(u,side),du=0.005;
-    const nx=fx(u+du,side)-fx(u-du,side),nz=DP*2*du,len=Math.max(Math.sqrt(nx*nx+nz*nz),0.001);
-    finPts.push(x,y,z,x+(-nz/len)*side*1.3,y,z+(nx/len)*side*1.3)}}
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));
-  const fg=new THREE.BufferGeometry();fg.setAttribute('position',new THREE.Float32BufferAttribute(finPts,3));
-  return{m:g,f:fg};
-}
-function mkBackMul(){
-  const pts=[],nv=40;
-  for(let i=0;i<=nv;i++){const x=-HW+(2*HW)*(i/nv);pts.push(x,0,RZ0,x,BH,RZ0)}
-  for(let f=0;f<=FL;f++){const y=(f/FL)*BH;pts.push(-HW,y,RZ0,HW,y,RZ0)}
-  for(let f=0;f<FL;f++){const y=((f+0.5)/FL)*BH;pts.push(-HW,y,RZ0,HW,y,RZ0)}
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));return g;
-}
-function mkEdge(side){const pts=[];for(let i=0;i<=140;i++){const u=i/140;pts.push(fx(u,side),fh(u,side),-DP/2+DP*u)}return new THREE.BufferGeometry().setFromPoints(pts)}
-function mkBlade(wB,dB,wT,dT,h,seg){
-  const p=[],idx=[];
-  for(let i=0;i<=seg;i++){const t=i/seg,y=t*h,w=wB+(wT-wB)*t,d=dB+(dT-dB)*t;
-    p.push(-w/2,y,-d/2,w/2,y,-d/2,w/2,y,d/2,-w/2,y,d/2)}
-  for(let i=0;i<seg;i++){const a=i*4,b=a+4;
-    idx.push(a,b,b+1,a,b+1,a+1,a+1,b+1,b+2,a+1,b+2,a+2,a+2,b+2,b+3,a+2,b+3,a+3,a+3,b+3,b,a+3,b,a)}
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(p,3));
-  g.setIndex(idx);g.computeVertexNormals();return g;
+// Roof height at parameter u (0=back, 1=front peak), with asymmetry
+function roofHeight(u, side) {
+  return BASE_H + (PEAK_H - BASE_H) * Math.pow(u, 2.0) + side * 2.2 * u;
 }
 
-/* ═══ 矩形后翼分格线 ═══ */
-function mkRectMul(wall){
-  const pts=[],nv=36,nf=4;
-  const isV=wall==='left'||wall==='right',isH=!isV;
-  /* 竖线 */
-  for(let i=0;i<=nv;i++){
-    let x,z0,z1;
-    if(wall==='left'){x=-HW;z0=RZ0;z1=RZ1}
-    else if(wall==='right'){x=HW;z0=RZ0;z1=RZ1}
-    else{x=-HW+(2*HW)*(i/nv);z0=RZ1;z1=RZ1}
-    for(let j=0;j<8;j++){const t0=j/8,t1=(j+1)/8;
-      pts.push(x,t0*RH,z0+t0*(z1-z0),x,t1*RH,z0+t1*(z1-z0))}}
-  /* 水平线 */
-  for(let f=0;f<=nf;f++){const y=(f/nf)*RH;for(let i=0;i<20;i++){
-    const t0=i/20,t1=(i+1)/20;
-    if(wall==='left')pts.push(-HW,y,RZ0+t0*RD,-HW,y,RZ0+t1*RD);
-    else if(wall==='right')pts.push(HW,y,RZ0+t0*RD,HW,y,RZ0+t1*RD);
-    else pts.push(-HW+t0*(2*HW),y,RZ1,-HW+t1*(2*HW),y,RZ1)}}
-  for(let f=0;f<nf;f++){const y=((f+0.5)/nf)*RH;for(let i=0;i<20;i++){
-    const t0=i/20,t1=(i+1)/20;
-    if(wall==='left')pts.push(-HW,y,RZ0+t0*RD,-HW,y,RZ0+t1*RD);
-    else if(wall==='right')pts.push(HW,y,RZ0+t0*RD,HW,y,RZ0+t1*RD);
-    else pts.push(-HW+t0*(2*HW),y,RZ1,-HW+t1*(2*HW),y,RZ1)}}
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));return g;
+// Facade X coordinate with parametric bulge and wave
+function facadeX(u, side) {
+  const base = side * HALF_W * (1 - u);
+  const bulge = Math.sin(u * Math.PI) * 3.8 * u;
+  const wave = Math.sin(u * Math.PI * 3 + (side > 0 ? 0 : 1.6)) * 1.1 * u;
+  return base + side * (bulge + wave);
 }
 
-/* ═══ 圆顶框架线 ═══ */
-function mkDomeFrame(){
-  const pts=[],nM=16,nP=6;
-  for(let i=0;i<nM;i++){const th=(i/nM)*Math.PI*2;
-    for(let j=0;j<20;j++){const p0=(j/20)*Math.PI/2,p1=((j+1)/20)*Math.PI/2;
-      pts.push(DCX+DR*Math.cos(p0)*Math.cos(th),DCY+DR*Math.sin(p0),DCZ+DR*Math.cos(p0)*Math.sin(th),
-               DCX+DR*Math.cos(p1)*Math.cos(th),DCY+DR*Math.sin(p1),DCZ+DR*Math.cos(p1)*Math.sin(th))}}
-  for(let j=1;j<nP;j++){const phi=(j/nP)*Math.PI/2,cr=DR*Math.cos(phi),cy=DCY+DR*Math.sin(phi);
-    for(let i=0;i<24;i++){const t0=(i/24)*Math.PI*2,t1=((i+1)/24)*Math.PI*2;
-      pts.push(DCX+cr*Math.cos(t0),cy,DCZ+cr*Math.sin(t0),DCX+cr*Math.cos(t1),cy,DCZ+cr*Math.sin(t1))}}
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pts,3));return g;
+// ══════════════════════════════════════
+// Renderer
+// ══════════════════════════════════════
+const renderer = new THREE.WebGLRenderer({
+  antialias: true,
+  powerPreference: 'high-performance'
+});
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+document.body.appendChild(renderer.domElement);
+
+// ══════════════════════════════════════
+// Scene, Camera, Controls
+// ══════════════════════════════════════
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0xc8d4e0, 0.0013);
+
+const camera = new THREE.PerspectiveCamera(
+  54, window.innerWidth / window.innerHeight, 0.5, 650
+);
+camera.position.set(0, 18, 72);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.target.set(0, 10, -4);
+controls.minDistance = 18;
+controls.maxDistance = 180;
+controls.maxPolarAngle = Math.PI / 2 - 0.02;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 0.2;
+
+// ══════════════════════════════════════
+// Environment Map (PMREMGenerator)
+// ══════════════════════════════════════
+function buildEnvironmentMap() {
+  const envScene = new THREE.Scene();
+
+  // Sky dome
+  const skyGeo = new THREE.SphereGeometry(400, 32, 24);
+  const skyMat = new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    uniforms: {
+      cTop: { value: new THREE.Color(0x2468a8) },
+      cMid: { value: new THREE.Color(0x78aed0) },
+      cBot: { value: new THREE.Color(0xc8d4e0) }
+    },
+    vertexShader: `
+      varying vec3 vWorldPos;
+      void main() {
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 cTop, cMid, cBot;
+      varying vec3 vWorldPos;
+      void main() {
+        float h = normalize(vWorldPos).y;
+        vec3 c = h > 0.0 ? mix(cMid, cTop, h) : mix(cMid, cBot, clamp(-h * 3.0, 0.0, 1.0));
+        gl_FragColor = vec4(c, 1.0);
+      }
+    `
+  });
+  envScene.add(new THREE.Mesh(skyGeo, skyMat));
+
+  // Sun disc
+  const sunDisc = new THREE.Mesh(
+    new THREE.SphereGeometry(22, 12, 12),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  );
+  sunDisc.position.set(0, 220, 180);
+  envScene.add(sunDisc);
+
+  // Sun glow patch
+  const glowPatch = new THREE.Mesh(
+    new THREE.PlaneGeometry(160, 160),
+    new THREE.MeshBasicMaterial({ color: 0xeeeeff, transparent: true, opacity: 0.38 })
+  );
+  glowPatch.position.set(0, 180, 220);
+  glowPatch.lookAt(0, 0, 0);
+  envScene.add(glowPatch);
+
+  // Simulated city buildings for reflections
+  const buildingColors = [0x5c6872, 0x6e7a84, 0x525e68, 0x78848e, 0x48545e, 0x3e4e5e, 0x344450];
+  for (let i = 0; i < 55; i++) {
+    const angle = (i / 55) * Math.PI * 2;
+    const dist = 160 + Math.random() * 90;
+    const w = 12 + Math.random() * 28;
+    const h = 28 + Math.random() * 85;
+    const d = 12 + Math.random() * 28;
+    const mat = new THREE.MeshBasicMaterial({
+      color: buildingColors[i % buildingColors.length]
+    });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    mesh.position.set(Math.cos(angle) * dist, h / 2, Math.sin(angle) * dist);
+    envScene.add(mesh);
+  }
+
+  // Ground
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(900, 900),
+    new THREE.MeshBasicMaterial({ color: 0x3a5a2e })
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.y = -0.1;
+  envScene.add(ground);
+
+  // Generate PMREM texture
+  const pmremGenerator = new THREE.PMREMGenerator(renderer);
+  pmremGenerator.compileEquirectangularShader();
+  const envTexture = pmremGenerator.fromScene(envScene, 0, 0.1, 1000).texture;
+  pmremGenerator.dispose();
+  return envTexture;
 }
 
-/* ═══ 组装建筑 ═══ */
-const bld=new THREE.Group();
+const envMap = buildEnvironmentMap();
+scene.environment = envMap;
 
-/* 三角区幕墙 */
-bld.add(new THREE.Mesh(mkFacade(-1),glass));
-bld.add(new THREE.Mesh(mkFacade(1),glass));
-const bw=new THREE.Mesh(new THREE.PlaneGeometry(HW*2,BH),glass);
-bw.position.set(0,BH/2,RZ0);bw.rotation.y=Math.PI;bld.add(bw);
-bld.add(new THREE.Mesh(mkRoof(),glass));
+// ══════════════════════════════════════
+// Materials
+// ══════════════════════════════════════
+const glassMaterial = new THREE.MeshPhysicalMaterial({
+  color: 0x82b8cc,
+  metalness: 0.1,
+  roughness: 0.012,
+  envMap: envMap,
+  envMapIntensity: 3.2,
+  clearcoat: 1.0,
+  clearcoatRoughness: 0.004,
+  reflectivity: 1.0,
+  transparent: true,
+  opacity: 0.84,
+  side: THREE.DoubleSide,
+  depthWrite: true
+});
 
-/* 三角区地板 */
-const flG=new THREE.BufferGeometry();
-flG.setAttribute('position',new THREE.Float32BufferAttribute([-HW,0.02,RZ0,HW,0.02,RZ0,0,0.02,DP/2],3));
-flG.setIndex([0,1,2]);flG.computeVertexNormals();
-bld.add(new THREE.Mesh(flG,new THREE.MeshStandardMaterial({color:0x353535,roughness:0.22,metalness:0.6})));
+const domeGlassMaterial = new THREE.MeshPhysicalMaterial({
+  color: 0x90c8e0,
+  metalness: 0.08,
+  roughness: 0.008,
+  envMap: envMap,
+  envMapIntensity: 3.5,
+  clearcoat: 1.0,
+  clearcoatRoughness: 0.002,
+  reflectivity: 1.0,
+  transparent: true,
+  opacity: 0.7,
+  side: THREE.DoubleSide,
+  depthWrite: true
+});
 
-/* 三角区楼板 */
-for(let f=1;f<FL;f++)bld.add(new THREE.Mesh(mkSlab(f*ST,0.5),slabMt));
+const spineMaterial = new THREE.MeshPhysicalMaterial({
+  color: 0xc8c8c8,
+  metalness: 0.92,
+  roughness: 0.04,
+  envMap: envMap,
+  envMapIntensity: 2.8
+});
 
-/* 三角区幕墙线 */
-const lm=mkMullions(-1);bld.add(new THREE.LineSegments(lm.m,mulMt));bld.add(new THREE.LineSegments(lm.f,new THREE.LineBasicMaterial({color:0x3a3a3a})));
-const rm=mkMullions(1);bld.add(new THREE.LineSegments(rm.m,mulMt));bld.add(new THREE.LineSegments(rm.f,new THREE.LineBasicMaterial({color:0x3a3a3a})));
-bld.add(new THREE.LineSegments(mkBackMul(),mulMt));
+const slabMaterial = new THREE.MeshStandardMaterial({
+  color: 0x484848,
+  roughness: 0.3,
+  metalness: 0.45,
+  transparent: true,
+  opacity: 0.55,
+  side: THREE.DoubleSide
+});
 
-/* 三角区边缘线 */
-bld.add(new THREE.Line(mkEdge(-1),edgeMt));bld.add(new THREE.Line(mkEdge(1),edgeMt));
-bld.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-HW,BH,RZ0),new THREE.Vector3(HW,BH,RZ0)]),edgeMt));
+const floorMaterial = new THREE.MeshStandardMaterial({
+  color: 0x353535,
+  roughness: 0.22,
+  metalness: 0.6
+});
 
-/* 椭圆天窗 */
-const oU=0.36,oW=0.42,oZ=RZ0+DP*oU;
-const oXL=fx(oU,-1),oXR=fx(oU,1),oX=oXL+oW*(oXR-oXL);
-const oH=fh(oU,-1)+oW*(fh(oU,1)-fh(oU,-1)),oRx=7.5,oRy=4.2;
-const frSh=new THREE.Shape();frSh.absellipse(0,0,oRx+0.6,oRy+0.4,0,Math.PI*2,false);
-const frHl=new THREE.Path();frHl.absellipse(0,0,oRx,oRy,0,Math.PI*2,true);frSh.holes.push(frHl);
-const frMesh=new THREE.Mesh(new THREE.ShapeGeometry(frSh,40),new THREE.MeshStandardMaterial({color:0x222222,roughness:0.35,metalness:0.75,side:THREE.DoubleSide}));
-frMesh.rotation.x=-Math.PI/2-0.1;frMesh.rotation.z=0.04;frMesh.position.set(oX,oH+0.12,oZ);bld.add(frMesh);
-const skMesh=new THREE.Mesh(new THREE.ShapeGeometry(new THREE.Shape().absellipse(0,0,oRx,oRy,0,Math.PI*2,false),40),new THREE.MeshBasicMaterial({color:0xd8e8ff,transparent:true,opacity:0.7,side:THREE.DoubleSide}));
-skMesh.rotation.x=-Math.PI/2-0.1;skMesh.rotation.z=0.04;skMesh.position.set(oX,oH-0.08,oZ);bld.add(skMesh);
-const skyL=new THREE.PointLight(0xd0e0ff,3,30);skyL.position.set(oX,oH-2,oZ);bld.add(skyL);
+const mullionMaterial = new THREE.LineBasicMaterial({ color: 0x1e1e1e });
+const finMaterial = new THREE.LineBasicMaterial({ color: 0x3a3a3a });
+const edgeMaterial = new THREE.LineBasicMaterial({
+  color: 0xffffff, transparent: true, opacity: 0.55
+});
 
-/* 中央脊柱+尖塔 */
-const spZ=-DP*0.1;
-const col=new THREE.Mesh(new THREE.BoxGeometry(1,BH,1),spineMt);col.position.set(0,BH/2,spZ);col.castShadow=true;bld.add(col);
-const spire=new THREE.Mesh(mkBlade(0.9,0.3,0.008,0.008,SP-BH,40),spineMt);spire.position.set(0,BH,spZ);spire.castShadow=true;bld.add(spire);
-bld.add(new THREE.PointLight(0xffffff,0.5,20).copy(Object.assign(new THREE.PointLight(0xffffff,0.5,20),{position:new THREE.Vector3(0,SP,spZ)})));
-const tipL=new THREE.PointLight(0xffffff,0.5,20);tipL.position.set(0,SP,spZ);bld.add(tipL);
+// ══════════════════════════════════════
+// Geometry Builders — Triangle Section
+// ══════════════════════════════════════
 
-/* 入口雨篷 */
-const canG=glass.clone();canG.opacity=0.6;
-const canopy=new THREE.Mesh(new THREE.PlaneGeometry(10,5),canG);
-canopy.position.set(0,4,DP/2+2.5);canopy.rotation.x=-Math.PI/2+0.06;canopy.castShadow=true;canopy.receiveShadow=true;bld.add(canopy);
-const pilG=new THREE.CylinderGeometry(0.12,0.12,4,8);
-const p1=new THREE.Mesh(pilG,spineMt);p1.position.set(-4.5,2,DP/2+1.8);p1.castShadow=true;bld.add(p1);
-const p2=p1.clone();p2.position.x=4.5;bld.add(p2);
+function buildCurvedFacade(side) {
+  const positions = [];
+  const uvs = [];
+  const indices = [];
 
-/* ═══ 矩形后翼 ═══ */
-/* 左侧墙 */
-const rL=new THREE.Mesh(new THREE.PlaneGeometry(RD,RH),glass);
-rL.position.set(-HW,RH/2,(RZ0+RZ1)/2);rL.rotation.y=Math.PI/2;bld.add(rL);
-/* 右侧墙 */
-const rR=new THREE.Mesh(new THREE.PlaneGeometry(RD,RH),glass);
-rR.position.set(HW,RH/2,(RZ0+RZ1)/2);rR.rotation.y=-Math.PI/2;bld.add(rR);
-/* 后墙 */
-const rB=new THREE.Mesh(new THREE.PlaneGeometry(HW*2,RH),glass);
-rB.position.set(0,RH/2,RZ1);rB.rotation.y=Math.PI;bld.add(rB);
-/* 屋面 */
-const rRf=new THREE.Mesh(new THREE.PlaneGeometry(HW*2,RD),glass);
-rRf.position.set(0,RH,(RZ0+RZ1)/2);rRf.rotation.x=-Math.PI/2;bld.add(rRf);
-/* 地板 */
-const rFl=new THREE.Mesh(new THREE.PlaneGeometry(HW*2,RD),new THREE.MeshStandardMaterial({color:0x353535,roughness:0.22,metalness:0.6}));
-rFl.position.set(0,0.02,(RZ0+RZ1)/2);rFl.rotation.x=-Math.PI/2;bld.add(rFl);
-/* 楼板 */
-for(let f=1;f<4;f++){const s=new THREE.Mesh(new THREE.PlaneGeometry(HW*2-1,RD-0.5),slabMt);
-  s.position.set(0,f*ST,(RZ0+RZ1)/2);s.rotation.x=-Math.PI/2;bld.add(s)}
+  for (let i = 0; i <= SEG; i++) {
+    const u = i / SEG;
+    const x = facadeX(u, side);
+    const z = -TRI_DEPTH / 2 + TRI_DEPTH * u;
+    const h = roofHeight(u, side);
 
-/* 台阶连接带 (三角20m→矩形16m) */
-const stepB=new THREE.Mesh(new THREE.PlaneGeometry(HW*2,ST),glass);
-stepB.position.set(0,RH+ST/2,RZ0);stepB.rotation.y=Math.PI;bld.add(stepB);
-bld.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-HW,BH,RZ0),new THREE.Vector3(HW,BH,RZ0)]),edgeMt));
-bld.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-HW,RH,RZ0),new THREE.Vector3(HW,RH,RZ0)]),new THREE.LineBasicMaterial({color:0xaaaaaa,transparent:true,opacity:0.5})));
-const stPts=[];
-for(let f=0;f<=1;f++){const y=RH+f*ST;stPts.push(-HW,y,RZ0,HW,y,RZ0)}
-for(let i=0;i<=36;i++){const x=-HW+(2*HW)*(i/36);stPts.push(x,RH,RZ0,x,BH,RZ0)}
-bld.add(new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(stPts,3)),mulMt));
+    for (let j = 0; j <= VSEG; j++) {
+      const v = j / VSEG;
+      positions.push(x, v * h, z);
+      uvs.push(u, v);
+    }
+  }
 
-/* 矩形幕墙线 */
-bld.add(new THREE.LineSegments(mkRectMul('left'),mulMt));
-bld.add(new THREE.LineSegments(mkRectMul('right'),mulMt));
-bld.add(new THREE.LineSegments(mkRectMul('back'),mulMt));
+  for (let i = 0; i < SEG; i++) {
+    for (let j = 0; j < VSEG; j++) {
+      const a = i * (VSEG + 1) + j;
+      const b = a + VSEG + 1;
+      if (side < 0) {
+        indices.push(a, b, b + 1, a, b + 1, a + 1);
+      } else {
+        indices.push(a, a + 1, b + 1, a, b + 1, b);
+      }
+    }
+  }
 
-/* 矩形屋顶边缘 */
-const rePts=[-HW,RH,RZ0,HW,RH,RZ0, HW,RH,RZ0,HW,RH,RZ1, -HW,RH,RZ0,-HW,RH,RZ1, -HW,RH,RZ1,HW,RH,RZ1];
-bld.add(new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position',new THREE.Float32BufferAttribute(rePts,3)),edgeMt));
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
 
-/* ═══ 圆顶天窗 ═══ */
-const dome=new THREE.Mesh(new THREE.SphereGeometry(DR,32,20,0,Math.PI*2,0,Math.PI/2),domeGlass);
-dome.position.set(DCX,DCY,DCZ);dome.castShadow=true;bld.add(dome);
+function buildTriRoof() {
+  const positions = [];
+  const uvs = [];
+  const indices = [];
 
-/* 底座环 */
-const ringPts=[];for(let i=0;i<=48;i++){const th=(i/48)*Math.PI*2;ringPts.push(new THREE.Vector3(DCX+DR*Math.cos(th),DCY,DCZ+DR*Math.sin(th)))}
-bld.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(ringPts),new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.7})));
+  for (let i = 0; i <= SEG; i++) {
+    const u = i / SEG;
+    const z = -TRI_DEPTH / 2 + TRI_DEPTH * u;
+    const xL = facadeX(u, -1);
+    const xR = facadeX(u, 1);
+    const hL = roofHeight(u, -1);
+    const hR = roofHeight(u, 1);
 
-/* 结构框架 */
-bld.add(new THREE.LineSegments(mkDomeFrame(),new THREE.LineBasicMaterial({color:0x3a3a3a,transparent:true,opacity:0.45})));
+    for (let j = 0; j <= WSEG; j++) {
+      const w = j / WSEG;
+      positions.push(
+        xL + w * (xR - xL),
+        hL + w * (hR - hL),
+        z
+      );
+      uvs.push(w, u);
+    }
+  }
 
-/* 顶点线 */
-bld.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(DCX,DCY,DCZ),new THREE.Vector3(DCX,DCY+DR,DCZ)]),new THREE.LineBasicMaterial({color:0xffffff,transparent:true,opacity:0.4})));
+  for (let i = 0; i < SEG; i++) {
+    for (let j = 0; j < WSEG; j++) {
+      const a = i * (WSEG + 1) + j;
+      const b = a + WSEG + 1;
+      indices.push(a, b, b + 1, a, b + 1, a + 1);
+    }
+  }
 
-/* 圆顶内光 */
-const dL1=new THREE.PointLight(0xd8ecff,4,35);dL1.position.set(DCX,DCY+DR*0.5,DCZ);bld.add(dL1);
-const dL2=new THREE.PointLight(0xc0d8f0,2,22);dL2.position.set(DCX,DCY+2,DCZ);bld.add(dL2);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setAttribute('uv', new THREE.Float32BufferAttribute(uvs, 2));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
 
-/* 阴影 */
-bld.traverse(c=>{if(c.isMesh){c.castShadow=true;c.receiveShadow=true}});scene.add(bld);
+function buildTriFloorSlab(floorHeight, inset) {
+  const s = 16;
+  const positions = [];
+  const indices = [];
 
-/* ═══ 城市 ═══ */
-const uMs=[new THREE.MeshStandardMaterial({color:0x606a74,roughness:0.85}),new THREE.MeshStandardMaterial({color:0x747e88,roughness:0.8}),
-  new THREE.MeshStandardMaterial({color:0x545e68,roughness:0.9}),new THREE.MeshStandardMaterial({color:0x808a92,roughness:0.75}),
-  new THREE.MeshStandardMaterial({color:0x686e78,roughness:0.88}),
-  new THREE.MeshPhysicalMaterial({color:0x3e4e5e,roughness:0.05,metalness:0.35,envMap,envMapIntensity:1.8}),
-  new THREE.MeshPhysicalMaterial({color:0x304050,roughness:0.04,metalness:0.4,envMap,envMapIntensity:2.0})];
-const lmMt=new THREE.MeshPhysicalMaterial({color:0x283848,roughness:0.03,metalness:0.45,envMap,envMapIntensity:2.4});
+  for (let i = 0; i <= s; i++) {
+    const u = i / s;
+    const xL = facadeX(u, -1) + inset;
+    const xR = facadeX(u, 1) - inset;
+    const z = -TRI_DEPTH / 2 + TRI_DEPTH * u;
 
-for(let ring=0;ring<4;ring++){const mn=FR+6+ring*18,mx=FR+22+ring*20,cnt=18+ring*14;
-  for(let i=0;i<cnt;i++){const a=(i/cnt)*Math.PI*2+(Math.random()-0.5)*0.5,d=mn+Math.random()*(mx-mn),
-    w=5+Math.random()*15,dp=5+Math.random()*15,h=16+Math.random()*48+ring*8;
-    const m=new THREE.Mesh(new THREE.BoxGeometry(w,h,dp),uMs[Math.floor(Math.random()*uMs.length)]);
-    m.position.set(Math.cos(a)*d,h/2,Math.sin(a)*d);m.rotation.y=a+(Math.random()-0.5)*0.6;
-    m.castShadow=d<75;m.receiveShadow=true;scene.add(m)}}
-[{a:0.35,d:88,w:14,dp:12,h:78},{a:1.85,d:98,w:18,dp:11,h:90},{a:3.55,d:82,w:12,dp:14,h:72},
- {a:5.05,d:92,w:15,dp:15,h:84},{a:2.7,d:108,w:11,dp:11,h:62},{a:4.4,d:102,w:13,dp:12,h:70}
-].forEach(l=>{const m=new THREE.Mesh(new THREE.BoxGeometry(l.w,l.h,l.dp),lmMt);
-  m.position.set(Math.cos(l.a)*l.d,l.h/2,Math.sin(l.a)*l.d);m.castShadow=true;m.receiveShadow=true;scene.add(m)});
+    for (let j = 0; j <= s; j++) {
+      const w = j / s;
+      positions.push(xL + w * (xR - xL), floorHeight, z);
+    }
+  }
 
-/* ═══ 地面 ═══ */
-const pave=new THREE.Mesh(new THREE.CircleGeometry(FR+6,64),new THREE.MeshStandardMaterial({color:0x88857e,roughness:0.72}));
-pave.rotation.x=-Math.PI/2;pave.position.y=0.003;pave.receiveShadow=true;scene.add(pave);
-const field=new THREE.Mesh(new THREE.RingGeometry(FR+5,380,64),new THREE.MeshStandardMaterial({color:0x3d6c30,roughness:0.92}));
-field.rotation.x=-Math.PI/2;field.position.y=0.001;field.receiveShadow=true;scene.add(field);
-const extG=new THREE.Mesh(new THREE.PlaneGeometry(800,800),new THREE.MeshStandardMaterial({color:0x525558,roughness:0.95}));
-extG.rotation.x=-Math.PI/2;extG.position.y=-0.01;extG.receiveShadow=true;scene.add(extG);
-const path=new THREE.Mesh(new THREE.PlaneGeometry(5,18),new THREE.MeshStandardMaterial({color:0x908c82,roughness:0.65}));
-path.rotation.x=-Math.PI/2;path.position.set(0,0.006,DP/2+9);path.receiveShadow=true;scene.add(path);
-const pathB=new THREE.Mesh(new THREE.PlaneGeometry(5,14),new THREE.MeshStandardMaterial({color:0x908c82,roughness:0.65}));
-pathB.rotation.x=-Math.PI/2;pathB.position.set(0,0.006,RZ1-7);pathB.receiveShadow=true;scene.add(pathB);
+  for (let i = 0; i < s; i++) {
+    for (let j = 0; j < s; j++) {
+      const a = i * (s + 1) + j;
+      const b = a + s + 1;
+      indices.push(a, b, b + 1, a, b + 1, a + 1);
+    }
+  }
 
-/* ═══ 树木 ═══ */
-const trMt=new THREE.MeshStandardMaterial({color:0x5a4230,roughness:0.9});
-const lfMs=[new THREE.MeshStandardMaterial({color:0x2a5818,roughness:0.85}),new THREE.MeshStandardMaterial({color:0x386826,roughness:0.8}),new THREE.MeshStandardMaterial({color:0x1c4812,roughness:0.9})];
-function addTree(x,z,s){const g=new THREE.Group();
-  const tr=new THREE.Mesh(new THREE.CylinderGeometry(0.1*s,0.18*s,2.8*s,6),trMt);tr.position.y=1.4*s;tr.castShadow=true;g.add(tr);
-  const lf=new THREE.Mesh(new THREE.SphereGeometry(1.6*s,8,7),lfMs[Math.floor(Math.random()*3)]);lf.position.y=3.6*s;lf.castShadow=true;g.add(lf);
-  g.position.set(x,0,z);scene.add(g)}
-for(let i=0;i<38;i++){const a=(i/38)*Math.PI*2+Math.random()*0.15,d=FR+1-Math.random()*5;
-  addTree(Math.cos(a)*d,Math.sin(a)*d,0.65+Math.random()*0.55)}
-addTree(-22,10,1.1);addTree(24,8,0.9);addTree(-16,20,1.05);addTree(19,18,0.8);addTree(-26,-8,0.95);
-addTree(29,-5,1);addTree(-10,26,0.85);addTree(12,24,0.9);addTree(-20,-22,1.05);addTree(22,-20,0.9);addTree(0,-26,1);
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
 
-/* ═══ 天穹 ═══ */
-scene.add(new THREE.Mesh(new THREE.SphereGeometry(440,32,24),new THREE.ShaderMaterial({side:THREE.BackSide,depthWrite:false,
-  uniforms:{cT:{value:new THREE.Color(0x2468a8)},cH:{value:new THREE.Color(0xc8d4e0)}},
-  vertexShader:'varying vec3 vW;void main(){vW=(modelMatrix*vec4(position,1.)).xyz;gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.);}',
-  fragmentShader:'uniform vec3 cT,cH;varying vec3 vW;void main(){float h=normalize(vW).y;gl_FragColor=vec4(mix(cH,cT,smoothstep(-.05,.55,h)),1.);}'
-})));
+function buildTriMullions(side) {
+  const mullionPts = [];
+  const finPts = [];
+  const numVert = 40;
 
-/* ═══ 灯光 ═══ */
-const sun=new THREE.DirectionalLight(0xfff4dc,4.5);sun.position.set(6,75,85);sun.target.position.set(0,8,-5);
-sun.castShadow=true;sun.shadow.mapSize.set(4096,4096);sun.shadow.camera.near=1;sun.shadow.camera.far=240;
-sun.shadow.camera.left=-58;sun.shadow.camera.right=58;sun.shadow.camera.top=58;sun.shadow.camera.bottom=-58;
-sun.shadow.bias=-0.00012;sun.shadow.normalBias=0.02;scene.add(sun);scene.add(sun.target);
-scene.add(new THREE.HemisphereLight(0x88b4d8,0x4a6630,0.9));
-const fill=new THREE.DirectionalLight(0xb0c8e0,0.55);fill.position.set(-35,22,-25);scene.add(fill);
-const iL1=new THREE.PointLight(0xffe8c0,2.2,35);iL1.position.set(0,10,-5);bld.add(iL1);
-const iL2=new THREE.PointLight(0xffe0a8,1.5,28);iL2.position.set(0,5,10);bld.add(iL2);
-const iL3=new THREE.PointLight(0xffe8c0,1.8,30);iL3.position.set(0,8,DCZ);bld.add(iL3);
+  // Dense vertical mullions
+  for (let vi = 0; vi <= numVert; vi++) {
+    const u = vi / numVert;
+    const x = facadeX(u, side);
+    const z = -TRI_DEPTH / 2 + TRI_DEPTH * u;
+    const h = roofHeight(u, side);
 
-/* ═══ 视角 ═══ */
-const views=[{p:[0,18,72],t:[0,12,-2]},{p:[-64,18,8],t:[0,12,-4]},{p:[64,18,8],t:[0,12,-4]},
-  {p:[46,24,56],t:[0,10,-6]},{p:[10,78,22],t:[0,0,-4]},{p:[0,16,-72],t:[0,14,DCZ]}];
-let cAnim=null;
-function ease(t){return t<0.5?4*t*t*t:1-Math.pow(-2*t+2,3)/2}
-document.querySelectorAll('.vb').forEach(btn=>{btn.addEventListener('click',()=>{
-  const v=views[parseInt(btn.dataset.v)];document.querySelectorAll('.vb').forEach(b=>b.classList.remove('ac'));
-  btn.classList.add('ac');ctrl.autoRotate=false;
-  cAnim={sp:cam.position.clone(),st:ctrl.target.clone(),ep:new THREE.Vector3(...v.p),et:new THREE.Vector3(...v.t),t0:performance.now(),dur:1500};
-})});
+    for (let j = 0; j < VSEG; j++) {
+      const v0 = j / VSEG;
+      const v1 = (j + 1) / VSEG;
+      mullionPts.push(x, v0 * h, z, x, v1 * h, z);
+    }
+  }
 
-/* ═══ 动画 ═══ */
-(function loop(){requestAnimationFrame(loop);
-  if(cAnim){const t=Math.min((performance.now()-cAnim.t0)/cAnim.dur,1),e=ease(t);
-    cam.position.lerpVectors(cAnim.sp,cAnim.ep,e);ctrl.target.lerpVectors(cAnim.st,cAnim.et,e);if(t>=1)cAnim=null}
-  ctrl.update();R.render(scene,cam)})();
-addEventListener('resize',()=>{cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();R.setSize(innerWidth,innerHeight)});
+  // Horizontal lines at each floor
+  for (let f = 0; f <= FLOORS; f++) {
+    const v = f / FLOORS;
+    for (let i = 0; i < SEG; i++) {
+      const u0 = i / SEG;
+      const u1 = (i + 1) / SEG;
+      mullionPts.push(
+        facadeX(u0, side), v * roofHeight(u0, side), -TRI_DEPTH / 2 + TRI_DEPTH * u0,
+        facadeX(u1, side), v * roofHeight(u1, side), -TRI_DEPTH / 2 + TRI_DEPTH * u1
+      );
+    }
+  }
+
+  // Mid-story horizontal transoms
+  for (let f = 0; f < FLOORS; f++) {
+    const v = (f + 0.5) / FLOORS;
+    for (let i = 0; i < SEG; i++) {
+      const u0 = i / SEG;
+      const u1 = (i + 1) / SEG;
+      mullionPts.push(
+        facadeX(u0, side), v * roofHeight(u0, side), -TRI_DEPTH / 2 + TRI_DEPTH * u0,
+        facadeX(u1, side), v * roofHeight(u1, side), -TRI_DEPTH / 2 + TRI_DEPTH * u1
+      );
+    }
+  }
+
+  // Parametric horizontal fins on alternate floors
+  for (let f = 1; f <= FLOORS; f += 2) {
+    const v = f / FLOORS;
+    for (let i = 2; i < SEG; i += 3) {
+      const u = i / SEG;
+      const x = facadeX(u, side);
+      const z = -TRI_DEPTH / 2 + TRI_DEPTH * u;
+      const y = v * roofHeight(u, side);
+      const du = 0.005;
+      const nx = facadeX(u + du, side) - facadeX(u - du, side);
+      const nz = TRI_DEPTH * 2 * du;
+      const len = Math.max(Math.sqrt(nx * nx + nz * nz), 0.001);
+      const ox = (-nz / len) * side * 1.3;
+      const oz = (nx / len) * side * 1.3;
+      finPts.push(x, y, z, x + ox, y, z + oz);
+    }
+  }
+
+  const mullionGeo = new THREE.BufferGeometry();
+  mullionGeo.setAttribute('position', new THREE.Float32BufferAttribute(mullionPts, 3));
+
+  const finGeo = new THREE.BufferGeometry();
+  finGeo.setAttribute('position', new THREE.Float32BufferAttribute(finPts, 3));
+
+  return { mullionGeo, finGeo };
+}
+
+function buildTriBackMullions() {
+  const pts = [];
+  const numV = 40;
+
+  // Verticals
+  for (let i = 0; i <= numV; i++) {
+    const x = -HALF_W + (2 * HALF_W) * (i / numV);
+    pts.push(x, 0, RECT_Z_FRONT, x, BASE_H, RECT_Z_FRONT);
+  }
+
+  // Floor horizontals
+  for (let f = 0; f <= FLOORS; f++) {
+    const y = (f / FLOORS) * BASE_H;
+    pts.push(-HALF_W, y, RECT_Z_FRONT, HALF_W, y, RECT_Z_FRONT);
+  }
+
+  // Mid-story transoms
+  for (let f = 0; f < FLOORS; f++) {
+    const y = ((f + 0.5) / FLOORS) * BASE_H;
+    pts.push(-HALF_W, y, RECT_Z_FRONT, HALF_W, y, RECT_Z_FRONT);
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return geo;
+}
+
+function buildRidgeEdge(side) {
+  const pts = [];
+  for (let i = 0; i <= 140; i++) {
+    const u = i / 140;
+    pts.push(facadeX(u, side), roofHeight(u, side), -TRI_DEPTH / 2 + TRI_DEPTH * u);
+  }
+  return new THREE.BufferGeometry().setFromPoints(pts);
+}
+
+function buildSpireBlade(wBase, dBase, wTip, dTip, height, segments) {
+  const positions = [];
+  const indices = [];
+
+  for (let i = 0; i <= segments; i++) {
+    const t = i / segments;
+    const y = t * height;
+    const w = wBase + (wTip - wBase) * t;
+    const d = dBase + (dTip - dBase) * t;
+    positions.push(-w / 2, y, -d / 2);
+    positions.push(w / 2, y, -d / 2);
+    positions.push(w / 2, y, d / 2);
+    positions.push(-w / 2, y, d / 2);
+  }
+
+  for (let i = 0; i < segments; i++) {
+    const a = i * 4;
+    const b = a + 4;
+    indices.push(
+      a, b, b + 1, a, b + 1, a + 1,
+      a + 1, b + 1, b + 2, a + 1, b + 2, a + 2,
+      a + 2, b + 2, b + 3, a + 2, b + 3, a + 3,
+      a + 3, b + 3, b, a + 3, b, a
+    );
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  geo.setIndex(indices);
+  geo.computeVertexNormals();
+  return geo;
+}
+
+// ══════════════════════════════════════
+// Geometry Builders — Rectangle Wing
+// ══════════════════════════════════════
+
+function buildRectWallMullions(wallType) {
+  const pts = [];
+  const numVert = 36;
+  const numFloors = 4;
+
+  if (wallType === 'left' || wallType === 'right') {
+    const xSign = wallType === 'left' ? -1 : 1;
+    const x = xSign * HALF_W;
+
+    // Verticals along depth
+    for (let i = 0; i <= numVert; i++) {
+      const t = i / numVert;
+      const z = RECT_Z_FRONT + t * (RECT_Z_BACK - RECT_Z_FRONT);
+      for (let j = 0; j < 8; j++) {
+        const v0 = j / 8;
+        const v1 = (j + 1) / 8;
+        pts.push(x, v0 * RECT_H, z, x, v1 * RECT_H, z);
+      }
+    }
+
+    // Floor horizontals
+    for (let f = 0; f <= numFloors; f++) {
+      const y = (f / numFloors) * RECT_H;
+      for (let i = 0; i < 20; i++) {
+        const t0 = i / 20;
+        const t1 = (i + 1) / 20;
+        pts.push(
+          x, y, RECT_Z_FRONT + t0 * RECT_DEPTH,
+          x, y, RECT_Z_FRONT + t1 * RECT_DEPTH
+        );
+      }
+    }
+
+    // Mid-story transoms
+    for (let f = 0; f < numFloors; f++) {
+      const y = ((f + 0.5) / numFloors) * RECT_H;
+      for (let i = 0; i < 20; i++) {
+        const t0 = i / 20;
+        const t1 = (i + 1) / 20;
+        pts.push(
+          x, y, RECT_Z_FRONT + t0 * RECT_DEPTH,
+          x, y, RECT_Z_FRONT + t1 * RECT_DEPTH
+        );
+      }
+    }
+  } else {
+    // Back wall
+    for (let i = 0; i <= numVert; i++) {
+      const x = -HALF_W + (2 * HALF_W) * (i / numVert);
+      for (let j = 0; j < 8; j++) {
+        const v0 = j / 8;
+        const v1 = (j + 1) / 8;
+        pts.push(x, v0 * RECT_H, RECT_Z_BACK, x, v1 * RECT_H, RECT_Z_BACK);
+      }
+    }
+
+    for (let f = 0; f <= numFloors; f++) {
+      const y = (f / numFloors) * RECT_H;
+      for (let i = 0; i < 20; i++) {
+        const t0 = i / 20;
+        const t1 = (i + 1) / 20;
+        pts.push(
+          -HALF_W + t0 * 2 * HALF_W, y, RECT_Z_BACK,
+          -HALF_W + t1 * 2 * HALF_W, y, RECT_Z_BACK
+        );
+      }
+    }
+
+    for (let f = 0; f < numFloors; f++) {
+      const y = ((f + 0.5) / numFloors) * RECT_H;
+      for (let i = 0; i < 20; i++) {
+        const t0 = i / 20;
+        const t1 = (i + 1) / 20;
+        pts.push(
+          -HALF_W + t0 * 2 * HALF_W, y, RECT_Z_BACK,
+          -HALF_W + t1 * 2 * HALF_W, y, RECT_Z_BACK
+        );
+      }
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return geo;
+}
+
+function buildDomeFrame() {
+  const pts = [];
+  const numMeridians = 16;
+  const numParallels = 6;
+  const numArcSeg = 20;
+
+  // Meridian ribs
+  for (let i = 0; i < numMeridians; i++) {
+    const theta = (i / numMeridians) * Math.PI * 2;
+    for (let j = 0; j < numArcSeg; j++) {
+      const phi0 = (j / numArcSeg) * Math.PI / 2;
+      const phi1 = ((j + 1) / numArcSeg) * Math.PI / 2;
+      const r0 = DOME_R * Math.cos(phi0);
+      const r1 = DOME_R * Math.cos(phi1);
+      pts.push(
+        DOME_CX + r0 * Math.cos(theta), DOME_CY + DOME_R * Math.sin(phi0), DOME_CZ + r0 * Math.sin(theta),
+        DOME_CX + r1 * Math.cos(theta), DOME_CY + DOME_R * Math.sin(phi1), DOME_CZ + r1 * Math.sin(theta)
+      );
+    }
+  }
+
+  // Parallel rings
+  for (let j = 1; j < numParallels; j++) {
+    const phi = (j / numParallels) * Math.PI / 2;
+    const cr = DOME_R * Math.cos(phi);
+    const cy = DOME_CY + DOME_R * Math.sin(phi);
+    for (let i = 0; i < 24; i++) {
+      const t0 = (i / 24) * Math.PI * 2;
+      const t1 = ((i + 1) / 24) * Math.PI * 2;
+      pts.push(
+        DOME_CX + cr * Math.cos(t0), cy, DOME_CZ + cr * Math.sin(t0),
+        DOME_CX + cr * Math.cos(t1), cy, DOME_CZ + cr * Math.sin(t1)
+      );
+    }
+  }
+
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return geo;
+}
+
+// ══════════════════════════════════════
+// Assemble Building
+// ══════════════════════════════════════
+const building = new THREE.Group();
+
+// --- Triangle Section: Curved Facades ---
+building.add(new THREE.Mesh(buildCurvedFacade(-1), glassMaterial));
+building.add(new THREE.Mesh(buildCurvedFacade(1), glassMaterial));
+
+// --- Triangle Section: Back Wall ---
+const backWallMesh = new THREE.Mesh(
+  new THREE.PlaneGeometry(HALF_W * 2, BASE_H),
+  glassMaterial
+);
+backWallMesh.position.set(0, BASE_H / 2, RECT_Z_FRONT);
+backWallMesh.rotation.y = Math.PI;
+building.add(backWallMesh);
+
+// --- Triangle Section: Roof ---
+building.add(new THREE.Mesh(buildTriRoof(), glassMaterial));
+
+// --- Triangle Section: Ground Floor ---
+const triFloorGeo = new THREE.BufferGeometry();
+triFloorGeo.setAttribute('position', new THREE.Float32BufferAttribute([
+  -HALF_W, 0.02, RECT_Z_FRONT,
+  HALF_W, 0.02, RECT_Z_FRONT,
+  0, 0.02, TRI_DEPTH / 2
+], 3));
+triFloorGeo.setIndex([0, 1, 2]);
+triFloorGeo.computeVertexNormals();
+building.add(new THREE.Mesh(triFloorGeo, floorMaterial));
+
+// --- Triangle Section: Floor Slabs ---
+for (let f = 1; f < FLOORS; f++) {
+  building.add(new THREE.Mesh(buildTriFloorSlab(f * STORY_H, 0.5), slabMaterial));
+}
+
+// --- Triangle Section: Mullion Grid ---
+const leftMullions = buildTriMullions(-1);
+building.add(new THREE.LineSegments(leftMullions.mullionGeo, mullionMaterial));
+building.add(new THREE.LineSegments(leftMullions.finGeo, finMaterial));
+
+const rightMullions = buildTriMullions(1);
+building.add(new THREE.LineSegments(rightMullions.mullionGeo, mullionMaterial));
+building.add(new THREE.LineSegments(rightMullions.finGeo, finMaterial));
+
+building.add(new THREE.LineSegments(buildTriBackMullions(), mullionMaterial));
+
+// --- Triangle Section: Ridge Edges ---
+building.add(new THREE.Line(buildRidgeEdge(-1), edgeMaterial));
+building.add(new THREE.Line(buildRidgeEdge(1), edgeMaterial));
+
+const backEdgeGeo = new THREE.BufferGeometry().setFromPoints([
+  new THREE.Vector3(-HALF_W, BASE_H, RECT_Z_FRONT),
+  new THREE.Vector3(HALF_W, BASE_H, RECT_Z_FRONT)
+]);
+building.add(new THREE.Line(backEdgeGeo, edgeMaterial));
+
+// --- Oval Skylight on Triangle Roof ---
+const ovalU = 0.36;
+const ovalW = 0.42;
+const ovalZ = RECT_Z_FRONT + TRI_DEPTH * ovalU;
+const ovalXL = facadeX(ovalU, -1);
+const ovalXR = facadeX(ovalU, 1);
+const ovalX = ovalXL + ovalW * (ovalXR - ovalXL);
+const ovalH = roofHeight(ovalU, -1) + ovalW * (roofHeight(ovalU, 1) - roofHeight(ovalU, -1));
+const ovalRx = 7.5;
+const ovalRy = 4.2;
+
+// Frame ring
+const frameShape = new THREE.Shape();
+frameShape.absellipse(0, 0, ovalRx + 0.6, ovalRy + 0.4, 0, Math.PI * 2, false);
+const frameHole = new THREE.Path();
+frameHole.absellipse(0, 0, ovalRx, ovalRy, 0, Math.PI * 2, true);
+frameShape.holes.push(frameHole);
+
+const frameMesh = new THREE.Mesh(
+  new THREE.ShapeGeometry(frameShape, 40),
+  new THREE.MeshStandardMaterial({
+    color: 0x222222, roughness: 0.35, metalness: 0.75, side: THREE.DoubleSide
+  })
+);
+frameMesh.rotation.x = -Math.PI / 2 - 0.1;
+frameMesh.rotation.z = 0.04;
+frameMesh.position.set(ovalX, ovalH + 0.12, ovalZ);
+building.add(frameMesh);
+
+// Glass fill
+const skylightShape = new THREE.Shape();
+skylightShape.absellipse(0, 0, ovalRx, ovalRy, 0, Math.PI * 2, false);
+const skylightMesh = new THREE.Mesh(
+  new THREE.ShapeGeometry(skylightShape, 40),
+  new THREE.MeshBasicMaterial({
+    color: 0xd8e8ff, transparent: true, opacity: 0.7, side: THREE.DoubleSide
+  })
+);
+skylightMesh.rotation.x = -Math.PI / 2 - 0.1;
+skylightMesh.rotation.z = 0.04;
+skylightMesh.position.set(ovalX, ovalH - 0.08, ovalZ);
+building.add(skylightMesh);
+
+const skylightGlow = new THREE.PointLight(0xd0e0ff, 3, 30);
+skylightGlow.position.set(ovalX, ovalH - 2, ovalZ);
+building.add(skylightGlow);
+
+// --- Central Spine & Spire ---
+const spineZ = -TRI_DEPTH * 0.1;
+
+const spineColumn = new THREE.Mesh(
+  new THREE.BoxGeometry(1.0, BASE_H, 1.0),
+  spineMaterial
+);
+spineColumn.position.set(0, BASE_H / 2, spineZ);
+spineColumn.castShadow = true;
+building.add(spineColumn);
+
+const spireBlade = new THREE.Mesh(
+  buildSpireBlade(0.9, 0.3, 0.008, 0.008, SPIRE_H - BASE_H, 40),
+  spineMaterial
+);
+spireBlade.position.set(0, BASE_H, spineZ);
+spireBlade.castShadow = true;
+building.add(spireBlade);
+
+const tipLight = new THREE.PointLight(0xffffff, 0.5, 20);
+tipLight.position.set(0, SPIRE_H, spineZ);
+building.add(tipLight);
+
+// --- Entrance Canopy ---
+const canopyGlass = glassMaterial.clone();
+canopyGlass.opacity = 0.6;
+const canopy = new THREE.Mesh(new THREE.PlaneGeometry(10, 5), canopyGlass);
+canopy.position.set(0, 4, TRI_DEPTH / 2 + 2.5);
+canopy.rotation.x = -Math.PI / 2 + 0.06;
+canopy.castShadow = true;
+canopy.receiveShadow = true;
+building.add(canopy);
+
+const pillarGeo = new THREE.CylinderGeometry(0.12, 0.12, 4, 8);
+const pillarLeft = new THREE.Mesh(pillarGeo, spineMaterial);
+pillarLeft.position.set(-4.5, 2, TRI_DEPTH / 2 + 1.8);
+pillarLeft.castShadow = true;
+building.add(pillarLeft);
+
+const pillarRight = new THREE.Mesh(pillarGeo, spineMaterial);
+pillarRight.position.set(4.5, 2, TRI_DEPTH / 2 + 1.8);
+pillarRight.castShadow = true;
+building.add(pillarRight);
+
+// ══════════════════════════════════════
+// Rectangle Wing
+// ══════════════════════════════════════
+
+// Left wall
+const rectLeftWall = new THREE.Mesh(
+  new THREE.PlaneGeometry(RECT_DEPTH, RECT_H),
+  glassMaterial
+);
+rectLeftWall.position.set(-HALF_W, RECT_H / 2, (RECT_Z_FRONT + RECT_Z_BACK) / 2);
+rectLeftWall.rotation.y = Math.PI / 2;
+building.add(rectLeftWall);
+
+// Right wall
+const rectRightWall = new THREE.Mesh(
+  new THREE.PlaneGeometry(RECT_DEPTH, RECT_H),
+  glassMaterial
+);
+rectRightWall.position.set(HALF_W, RECT_H / 2, (RECT_Z_FRONT + RECT_Z_BACK) / 2);
+rectRightWall.rotation.y = -Math.PI / 2;
+building.add(rectRightWall);
+
+// Back wall
+const rectBackWall = new THREE.Mesh(
+  new THREE.PlaneGeometry(HALF_W * 2, RECT_H),
+  glassMaterial
+);
+rectBackWall.position.set(0, RECT_H / 2, RECT_Z_BACK);
+rectBackWall.rotation.y = Math.PI;
+building.add(rectBackWall);
+
+// Roof (flat, with hole for dome — simplified as full plane, dome sits on top)
+const rectRoof = new THREE.Mesh(
+  new THREE.PlaneGeometry(HALF_W * 2, RECT_DEPTH),
+  glassMaterial
+);
+rectRoof.position.set(0, RECT_H, (RECT_Z_FRONT + RECT_Z_BACK) / 2);
+rectRoof.rotation.x = -Math.PI / 2;
+building.add(rectRoof);
+
+// Ground floor
+const rectFloor = new THREE.Mesh(
+  new THREE.PlaneGeometry(HALF_W * 2, RECT_DEPTH),
+  floorMaterial
+);
+rectFloor.position.set(0, 0.02, (RECT_Z_FRONT + RECT_Z_BACK) / 2);
+rectFloor.rotation.x = -Math.PI / 2;
+building.add(rectFloor);
+
+// Internal floor slabs (4 floors in 16m)
+for (let f = 1; f < 4; f++) {
+  const slab = new THREE.Mesh(
+    new THREE.PlaneGeometry(HALF_W * 2 - 1, RECT_DEPTH - 0.5),
+    slabMaterial
+  );
+  slab.position.set(0, f * STORY_H, (RECT_Z_FRONT + RECT_Z_BACK) / 2);
+  slab.rotation.x = -Math.PI / 2;
+  building.add(slab);
+}
+
+// Step connection band (between triangle back wall and rectangle roof)
+const stepBand = new THREE.Mesh(
+  new THREE.PlaneGeometry(HALF_W * 2, STORY_H),
+  glassMaterial
+);
+stepBand.position.set(0, RECT_H + STORY_H / 2, RECT_Z_FRONT);
+stepBand.rotation.y = Math.PI;
+building.add(stepBand);
+
+// Step band edge lines
+building.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+  new THREE.Vector3(-HALF_W, BASE_H, RECT_Z_FRONT),
+  new THREE.Vector3(HALF_W, BASE_H, RECT_Z_FRONT)
+]), edgeMaterial));
+
+building.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints([
+  new THREE.Vector3(-HALF_W, RECT_H, RECT_Z_FRONT),
+  new THREE.Vector3(HALF_W, RECT_H, RECT_Z_FRONT)
+]), new THREE.LineBasicMaterial({ color: 0xaaaaaa, transparent: true, opacity: 0.5 })));
+
+// Step band mullions
+const stepMullionPts = [];
+for (let f = 0; f <= 1; f++) {
+  const y = RECT_H + f * STORY_H;
+  stepMullionPts.push(-HALF_W, y, RECT_Z_FRONT, HALF_W, y, RECT_Z_FRONT);
+}
+for (let i = 0; i <= 36; i++) {
+  const x = -HALF_W + (2 * HALF_W) * (i / 36);
+  stepMullionPts.push(x, RECT_H, RECT_Z_FRONT, x, BASE_H, RECT_Z_FRONT);
+}
+const stepMulGeo = new THREE.BufferGeometry();
+stepMulGeo.setAttribute('position', new THREE.Float32BufferAttribute(stepMullionPts, 3));
+building.add(new THREE.LineSegments(stepMulGeo, mullionMaterial));
+
+// Rectangle wing mullion grids
+building.add(new THREE.LineSegments(buildRectWallMullions('left'), mullionMaterial));
+building.add(new THREE.LineSegments(buildRectWallMullions('right'), mullionMaterial));
+building.add(new THREE.LineSegments(buildRectWallMullions('back'), mullionMaterial));
+
+// Rectangle roof edge lines
+const rectEdgePts = [
+  -HALF_W, RECT_H, RECT_Z_FRONT, HALF_W, RECT_H, RECT_Z_FRONT,
+  HALF_W, RECT_H, RECT_Z_FRONT, HALF_W, RECT_H, RECT_Z_BACK,
+  -HALF_W, RECT_H, RECT_Z_FRONT, -HALF_W, RECT_H, RECT_Z_BACK,
+  -HALF_W, RECT_H, RECT_Z_BACK, HALF_W, RECT_H, RECT_Z_BACK
+];
+const rectEdgeGeo = new THREE.BufferGeometry();
+rectEdgeGeo.setAttribute('position', new THREE.Float32BufferAttribute(rectEdgePts, 3));
+building.add(new THREE.LineSegments(rectEdgeGeo, edgeMaterial));
+
+// ══════════════════════════════════════
+// Dome Skylight on Rectangle
+// ══════════════════════════════════════
+
+const domeGeo = new THREE.SphereGeometry(
+  DOME_R, 32, 20, 0, Math.PI * 2, 0, Math.PI / 2
+);
+const domeMesh = new THREE.Mesh(domeGeo, domeGlassMaterial);
+domeMesh.position.set(DOME_CX, DOME_CY, DOME_CZ);
+domeMesh.castShadow = true;
+building.add(domeMesh);
+
+// Base ring highlight
+const baseRingPts = [];
+for (let i = 0; i <= 48; i++) {
+  const theta = (i / 48) * Math.PI * 2;
+  baseRingPts.push(new THREE.Vector3(
+    DOME_CX + DOME_R * Math.cos(theta),
+    DOME_CY,
+    DOME_CZ + DOME_R * Math.sin(theta)
+  ));
+}
+building.add(new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints(baseRingPts),
+  new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7 })
+));
+
+// Structural frame (meridians + parallels)
+building.add(new THREE.LineSegments(
+  buildDomeFrame(),
+  new THREE.LineBasicMaterial({ color: 0x3a3a3a, transparent: true, opacity: 0.45 })
+));
+
+// Vertical axis line
+building.add(new THREE.Line(
+  new THREE.BufferGeometry().setFromPoints([
+    new THREE.Vector3(DOME_CX, DOME_CY, DOME_CZ),
+    new THREE.Vector3(DOME_CX, DOME_CY + DOME_R, DOME_CZ)
+  ]),
+  new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.4 })
+));
+
+// Dome interior lights
+const domeLight1 = new THREE.PointLight(0xd8ecff, 4, 35);
+domeLight1.position.set(DOME_CX, DOME_CY + DOME_R * 0.5, DOME_CZ);
+building.add(domeLight1);
+
+const domeLight2 = new THREE.PointLight(0xc0d8f0, 2, 22);
+domeLight2.position.set(DOME_CX, DOME_CY + 2, DOME_CZ);
+building.add(domeLight2);
+
+// Enable shadows on all meshes
+building.traverse(function(child) {
+  if (child.isMesh) {
+    child.castShadow = true;
+    child.receiveShadow = true;
+  }
+});
+
+scene.add(building);
+
+// ══════════════════════════════════════
+// Urban Context
+// ══════════════════════════════════════
+const urbanMaterials = [
+  new THREE.MeshStandardMaterial({ color: 0x606a74, roughness: 0.85 }),
+  new THREE.MeshStandardMaterial({ color: 0x747e88, roughness: 0.8 }),
+  new THREE.MeshStandardMaterial({ color: 0x545e68, roughness: 0.9 }),
+  new THREE.MeshStandardMaterial({ color: 0x808a92, roughness: 0.75 }),
+  new THREE.MeshStandardMaterial({ color: 0x686e78, roughness: 0.88 }),
+  new THREE.MeshPhysicalMaterial({
+    color: 0x3e4e5e, roughness: 0.05, metalness: 0.35,
+    envMap: envMap, envMapIntensity: 1.8
+  }),
+  new THREE.MeshPhysicalMaterial({
+    color: 0x304050, roughness: 0.04, metalness: 0.4,
+    envMap: envMap, envMapIntensity: 2.0
+  })
+];
+
+const landmarkMaterial = new THREE.MeshPhysicalMaterial({
+  color: 0x283848, roughness: 0.03, metalness: 0.45,
+  envMap: envMap, envMapIntensity: 2.4
+});
+
+// Concentric rings of buildings
+for (let ring = 0; ring < 4; ring++) {
+  const minDist = FIELD_R + 6 + ring * 18;
+  const maxDist = FIELD_R + 22 + ring * 20;
+  const count = 18 + ring * 14;
+
+  for (let i = 0; i < count; i++) {
+    const angle = (i / count) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+    const dist = minDist + Math.random() * (maxDist - minDist);
+    const w = 5 + Math.random() * 15;
+    const d = 5 + Math.random() * 15;
+    const h = 16 + Math.random() * 48 + ring * 8;
+    const mat = urbanMaterials[Math.floor(Math.random() * urbanMaterials.length)];
+
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+    mesh.position.set(Math.cos(angle) * dist, h / 2, Math.sin(angle) * dist);
+    mesh.rotation.y = angle + (Math.random() - 0.5) * 0.6;
+    mesh.castShadow = dist < 75;
+    mesh.receiveShadow = true;
+    scene.add(mesh);
+  }
+}
+
+// Landmark towers
+const landmarkData = [
+  { a: 0.35, d: 88, w: 14, dp: 12, h: 78 },
+  { a: 1.85, d: 98, w: 18, dp: 11, h: 90 },
+  { a: 3.55, d: 82, w: 12, dp: 14, h: 72 },
+  { a: 5.05, d: 92, w: 15, dp: 15, h: 84 },
+  { a: 2.7, d: 108, w: 11, dp: 11, h: 62 },
+  { a: 4.4, d: 102, w: 13, dp: 12, h: 70 }
+];
+for (const lm of landmarkData) {
+  const mesh = new THREE.Mesh(
+    new THREE.BoxGeometry(lm.w, lm.h, lm.dp),
+    landmarkMaterial
+  );
+  mesh.position.set(
+    Math.cos(lm.a) * lm.d,
+    lm.h / 2,
+    Math.sin(lm.a) * lm.d
+  );
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  scene.add(mesh);
+}
+
+// ══════════════════════════════════════
+// Ground
+// ══════════════════════════════════════
+const pavingMesh = new THREE.Mesh(
+  new THREE.CircleGeometry(FIELD_R + 6, 64),
+  new THREE.MeshStandardMaterial({ color: 0x88857e, roughness: 0.72 })
+);
+pavingMesh.rotation.x = -Math.PI / 2;
+pavingMesh.position.y = 0.003;
+pavingMesh.receiveShadow = true;
+scene.add(pavingMesh);
+
+const grassMesh = new THREE.Mesh(
+  new THREE.RingGeometry(FIELD_R + 5, 380, 64),
+  new THREE.MeshStandardMaterial({ color: 0x3d6c30, roughness: 0.92 })
+);
+grassMesh.rotation.x = -Math.PI / 2;
+grassMesh.position.y = 0.001;
+grassMesh.receiveShadow = true;
+scene.add(grassMesh);
+
+const outerGround = new THREE.Mesh(
+  new THREE.PlaneGeometry(800, 800),
+  new THREE.MeshStandardMaterial({ color: 0x525558, roughness: 0.95 })
+);
+outerGround.rotation.x = -Math.PI / 2;
+outerGround.position.y = -0.01;
+outerGround.receiveShadow = true;
+scene.add(outerGround);
+
+// Front path
+const frontPath = new THREE.Mesh(
+  new THREE.PlaneGeometry(5, 18),
+  new THREE.MeshStandardMaterial({ color: 0x908c82, roughness: 0.65 })
+);
+frontPath.rotation.x = -Math.PI / 2;
+frontPath.position.set(0, 0.006, TRI_DEPTH / 2 + 9);
+frontPath.receiveShadow = true;
+scene.add(frontPath);
+
+// Rear path
+const rearPath = new THREE.Mesh(
+  new THREE.PlaneGeometry(5, 14),
+  new THREE.MeshStandardMaterial({ color: 0x908c82, roughness: 0.65 })
+);
+rearPath.rotation.x = -Math.PI / 2;
+rearPath.position.set(0, 0.006, RECT_Z_BACK - 7);
+rearPath.receiveShadow = true;
+scene.add(rearPath);
+
+// ══════════════════════════════════════
+// Trees
+// ══════════════════════════════════════
+const trunkMaterial = new THREE.MeshStandardMaterial({ color: 0x5a4230, roughness: 0.9 });
+const leafMaterials = [
+  new THREE.MeshStandardMaterial({ color: 0x2a5818, roughness: 0.85 }),
+  new THREE.MeshStandardMaterial({ color: 0x386826, roughness: 0.8 }),
+  new THREE.MeshStandardMaterial({ color: 0x1c4812, roughness: 0.9 })
+];
+
+function addTree(x, z, scale) {
+  const group = new THREE.Group();
+  const trunk = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.1 * scale, 0.18 * scale, 2.8 * scale, 6),
+    trunkMaterial
+  );
+  trunk.position.y = 1.4 * scale;
+  trunk.castShadow = true;
+  group.add(trunk);
+
+  const canopy = new THREE.Mesh(
+    new THREE.SphereGeometry(1.6 * scale, 8, 7),
+    leafMaterials[Math.floor(Math.random() * 3)]
+  );
+  canopy.position.y = 3.6 * scale;
+  canopy.castShadow = true;
+  group.add(canopy);
+
+  group.position.set(x, 0, z);
+  scene.add(group);
+}
+
+// Perimeter trees
+for (let i = 0; i < 38; i++) {
+  const angle = (i / 38) * Math.PI * 2 + Math.random() * 0.15;
+  const dist = FIELD_R + 1 - Math.random() * 5;
+  addTree(Math.cos(angle) * dist, Math.sin(angle) * dist, 0.65 + Math.random() * 0.55);
+}
+
+// Interior accent trees
+addTree(-22, 10, 1.1);
+addTree(24, 8, 0.9);
+addTree(-16, 20, 1.05);
+addTree(19, 18, 0.8);
+addTree(-26, -8, 0.95);
+addTree(29, -5, 1.0);
+addTree(-10, 26, 0.85);
+addTree(12, 24, 0.9);
+addTree(-20, -22, 1.05);
+addTree(22, -20, 0.9);
+addTree(0, -26, 1.0);
+
+// ══════════════════════════════════════
+// Sky Dome
+// ══════════════════════════════════════
+scene.add(new THREE.Mesh(
+  new THREE.SphereGeometry(440, 32, 24),
+  new THREE.ShaderMaterial({
+    side: THREE.BackSide,
+    depthWrite: false,
+    uniforms: {
+      cTop: { value: new THREE.Color(0x2468a8) },
+      cHor: { value: new THREE.Color(0xc8d4e0) }
+    },
+    vertexShader: `
+      varying vec3 vWorldPos;
+      void main() {
+        vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    `,
+    fragmentShader: `
+      uniform vec3 cTop, cHor;
+      varying vec3 vWorldPos;
+      void main() {
+        float h = normalize(vWorldPos).y;
+        gl_FragColor = vec4(mix(cHor, cTop, smoothstep(-0.05, 0.55, h)), 1.0);
+      }
+    `
+  })
+));
+
+// ══════════════════════════════════════
+// Lighting — Noon South-Facing
+// ══════════════════════════════════════
+const sunLight = new THREE.DirectionalLight(0xfff4dc, 4.5);
+sunLight.position.set(6, 75, 85);
+sunLight.target.position.set(0, 8, -5);
+sunLight.castShadow = true;
+sunLight.shadow.mapSize.set(4096, 4096);
+sunLight.shadow.camera.near = 1;
+sunLight.shadow.camera.far = 240;
+sunLight.shadow.camera.left = -58;
+sunLight.shadow.camera.right = 58;
+sunLight.shadow.camera.top = 58;
+sunLight.shadow.camera.bottom = -58;
+sunLight.shadow.bias = -0.00012;
+sunLight.shadow.normalBias = 0.02;
+scene.add(sunLight);
+scene.add(sunLight.target);
+
+scene.add(new THREE.HemisphereLight(0x88b4d8, 0x4a6630, 0.9));
+
+const fillLight = new THREE.DirectionalLight(0xb0c8e0, 0.55);
+fillLight.position.set(-35, 22, -25);
+scene.add(fillLight);
+
+// Interior warm lights (visible through glass)
+const intLight1 = new THREE.PointLight(0xffe8c0, 2.2, 35);
+intLight1.position.set(0, 10, -5);
+building.add(intLight1);
+
+const intLight2 = new THREE.PointLight(0xffe0a8, 1.5, 28);
+intLight2.position.set(0, 5, 10);
+building.add(intLight2);
+
+const intLight3 = new THREE.PointLight(0xffe8c0, 1.8, 30);
+intLight3.position.set(0, 8, DOME_CZ);
+building.add(intLight3);
+
+// ══════════════════════════════════════
+// Camera Presets
+// ══════════════════════════════════════
+const viewPresets = [
+  { pos: [0, 18, 72], target: [0, 12, -2] },     // Front
+  { pos: [-64, 18, 8], target: [0, 12, -4] },     // Left
+  { pos: [64, 18, 8], target: [0, 12, -4] },      // Right
+  { pos: [46, 24, 56], target: [0, 10, -6] },     // 3/4
+  { pos: [10, 78, 22], target: [0, 0, -4] },      // Aerial
+  { pos: [0, 16, -72], target: [0, 14, DOME_CZ] } // Rear (shows dome)
+];
+
+let cameraAnimation = null;
+
+function easeInOutCubic(t) {
+  return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+}
+
+document.querySelectorAll('.vb').forEach(function(btn) {
+  btn.addEventListener('click', function() {
+    const preset = viewPresets[parseInt(btn.dataset.v)];
+    document.querySelectorAll('.vb').forEach(function(b) {
+      b.classList.remove('ac');
+    });
+    btn.classList.add('ac');
+    controls.autoRotate = false;
+    cameraAnimation = {
+      startPos: camera.position.clone(),
+      startTarget: controls.target.clone(),
+      endPos: new THREE.Vector3(preset.pos[0], preset.pos[1], preset.pos[2]),
+      endTarget: new THREE.Vector3(preset.target[0], preset.target[1], preset.target[2]),
+      startTime: performance.now(),
+      duration: 1500
+    };
+  });
+});
+
+// ══════════════════════════════════════
+// Animation Loop
+// ══════════════════════════════════════
+function animate() {
+  requestAnimationFrame(animate);
+
+  if (cameraAnimation) {
+    const elapsed = performance.now() - cameraAnimation.startTime;
+    const t = Math.min(elapsed / cameraAnimation.duration, 1);
+    const e = easeInOutCubic(t);
+
+    camera.position.lerpVectors(cameraAnimation.startPos, cameraAnimation.endPos, e);
+    controls.target.lerpVectors(cameraAnimation.startTarget, cameraAnimation.endTarget, e);
+
+    if (t >= 1) {
+      cameraAnimation = null;
+    }
+  }
+
+  controls.update();
+  renderer.render(scene, camera);
+}
+
+animate();
+
+// ══════════════════════════════════════
+// Resize Handler
+// ══════════════════════════════════════
+window.addEventListener('resize', function() {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
 </script>
 </body>
 </html>
